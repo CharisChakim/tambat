@@ -63,6 +63,34 @@ class LocalSftp(SFTPServerInterface):
         except OSError as e:
             return SFTPServer.convert_errno(e.errno)
 
+    def mkdir(self, path, attr):
+        try:
+            os.mkdir(path, getattr(attr, "st_mode", None) or 0o755)
+            return SFTP_OK
+        except OSError as e:
+            return SFTPServer.convert_errno(e.errno)
+
+    def rename(self, oldpath, newpath):
+        try:
+            os.rename(oldpath, newpath)
+            return SFTP_OK
+        except OSError as e:
+            return SFTPServer.convert_errno(e.errno)
+
+    def remove(self, path):
+        try:
+            os.remove(path)
+            return SFTP_OK
+        except OSError as e:
+            return SFTPServer.convert_errno(e.errno)
+
+    def rmdir(self, path):
+        try:
+            os.rmdir(path)
+            return SFTP_OK
+        except OSError as e:
+            return SFTPServer.convert_errno(e.errno)
+
     def open(self, path, flags, attr):
         try:
             fd = os.open(path, flags, getattr(attr, "st_mode", None) or 0o644)

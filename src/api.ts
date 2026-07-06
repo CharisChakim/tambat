@@ -24,11 +24,24 @@ export const panelList = (id: string, path: string) =>
 export const panelStats = (id: string) =>
   invoke<ServerStats>("panel_stats", { id });
 
-export const panelOpenFile = (id: string, path: string) =>
-  invoke<void>("panel_open_file", { id, path });
+export const panelOpenFile = (id: string, path: string, textEditor = false) =>
+  invoke<void>("panel_open_file", { id, path, textEditor });
 
 export const panelTransfer = (id: string, src: string, destDir: string, mv: boolean) =>
   invoke<void>("panel_transfer", { id, src, destDir, mv });
+
+export const panelMkdir = (id: string, dir: string, name: string) =>
+  invoke<void>("panel_mkdir", { id, dir, name });
+
+export const panelRename = (id: string, src: string, newName: string) =>
+  invoke<void>("panel_rename", { id, src, newName });
+
+export const panelDelete = (id: string, path: string) =>
+  invoke<void>("panel_delete", { id, path });
+
+/** Unduh ke folder Unduhan; mengembalikan path lokal hasil unduhan. */
+export const panelDownload = (id: string, path: string) =>
+  invoke<string>("panel_download", { id, path });
 
 export const panelClose = (id: string) => invoke<void>("panel_close", { id });
 

@@ -37,6 +37,26 @@ pub enum PanelCmd {
         mv: bool,
         reply: Sender<Result<(), String>>,
     },
+    Mkdir {
+        dir: String,
+        name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    Rename {
+        src: String,
+        new_name: String,
+        reply: Sender<Result<(), String>>,
+    },
+    /// Hapus file/folder (rm -rf) di server.
+    Delete {
+        path: String,
+        reply: Sender<Result<(), String>>,
+    },
+    /// Unduh file remote ke folder Unduhan lokal, balas path lokalnya.
+    Download {
+        path: String,
+        reply: Sender<Result<std::path::PathBuf, String>>,
+    },
     Close,
 }
 
@@ -83,6 +103,10 @@ pub struct ServerStats {
     pub ping_google_ms: Option<f64>,
     /// suhu CPU/SoC dalam °C; None jika sensor tidak tersedia
     pub temp_c: Option<f64>,
+    /// lama server menyala, detik; 0 = tidak terbaca
+    pub uptime_s: u64,
+    /// load average 1 menit
+    pub load1: Option<f64>,
 }
 
 /// Skrip dikirim lewat stdin `sh` (bukan argumen exec) supaya tetap POSIX
@@ -107,6 +131,9 @@ done
 for h in /sys/class/hwmon/hwmon*; do
   [ -r "$h/temp1_input" ] && echo "$(cat "$h/name" 2>/dev/null) $(cat "$h/temp1_input" 2>/dev/null)"
 done
+echo ===UP
+cat /proc/uptime 2>/dev/null
+cat /proc/loadavg 2>/dev/null
 echo ===PING
 (ping -n -c 1 -W 1 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/CF \1/p') &
 (ping -n -c 1 -W 1 8.8.8.8 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/GG \1/p') &
@@ -166,6 +193,19 @@ fn parse_stats(out: &str) -> ServerStats {
                     let c = if v > 200.0 { v / 1000.0 } else { v };
                     if c > 0.0 && c < 150.0 {
                         temps.push((name.to_lowercase(), c));
+                    }
+                }
+            }
+            "UP" => {
+                // /proc/uptime: "12345.67 8910.11"; /proc/loadavg: "0.84 0.71 0.66 2/401 1234"
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.len() >= 4 {
+                    if let Ok(l) = fields[0].parse() {
+                        s.load1 = Some(l);
+                    }
+                } else if s.uptime_s == 0 {
+                    if let Some(Ok(up)) = fields.first().map(|v| v.parse::<f64>()) {
+                        s.uptime_s = up as u64;
                     }
                 }
             }
@@ -277,6 +317,29 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// Jalankan perintah lewat `sh` di server; Err berisi stderr bila gagal.
+fn run_sh(sess: &Session, cmd: &str, label: &str) -> Result<(), String> {
+    let mut ch = sess.channel_session().map_err(|e| e.to_string())?;
+    ch.exec("sh").map_err(|e| e.to_string())?;
+    ch.write_all(cmd.as_bytes()).map_err(|e| e.to_string())?;
+    ch.send_eof().map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    let _ = ch.read_to_string(&mut out);
+    let mut err = String::new();
+    let _ = ch.stderr().read_to_string(&mut err);
+    let _ = ch.close();
+    let _ = ch.wait_close();
+    let code = ch.exit_status().unwrap_or(-1);
+    if code != 0 {
+        return Err(if err.trim().is_empty() {
+            format!("Perintah {} gagal (kode {})", label, code)
+        } else {
+            err.trim().to_string()
+        });
+    }
+    Ok(())
+}
+
 fn do_transfer(
     sess: &Session,
     sftp: &Sftp,
@@ -306,34 +369,97 @@ fn do_transfer(
         sh_quote(src),
         sh_quote(&dest)
     );
-    let mut ch = sess.channel_session().map_err(|e| e.to_string())?;
-    ch.exec("sh").map_err(|e| e.to_string())?;
-    ch.write_all(cmd.as_bytes()).map_err(|e| e.to_string())?;
-    ch.send_eof().map_err(|e| e.to_string())?;
-    let mut out = String::new();
-    let _ = ch.read_to_string(&mut out);
-    let mut err = String::new();
-    let _ = ch.stderr().read_to_string(&mut err);
-    let _ = ch.close();
-    let _ = ch.wait_close();
-    let code = ch.exit_status().unwrap_or(-1);
-    if code != 0 {
-        return Err(if err.trim().is_empty() {
-            format!("Perintah {} gagal (kode {})", if mv { "mv" } else { "cp" }, code)
-        } else {
-            err.trim().to_string()
-        });
+    run_sh(sess, &cmd, if mv { "mv" } else { "cp" })
+}
+
+fn do_mkdir(sftp: &Sftp, dir: &str, name: &str) -> Result<(), String> {
+    if name.is_empty() || name.contains('/') {
+        return Err("Nama folder tidak valid".into());
     }
-    Ok(())
+    let path = if dir == "/" {
+        format!("/{}", name)
+    } else {
+        format!("{}/{}", dir, name)
+    };
+    sftp.mkdir(Path::new(&path), 0o755)
+        .map_err(|e| format!("Gagal membuat folder: {}", e))
+}
+
+fn do_rename(sftp: &Sftp, src: &str, new_name: &str) -> Result<(), String> {
+    if new_name.is_empty() || new_name.contains('/') {
+        return Err("Nama baru tidak valid".into());
+    }
+    let parent = Path::new(src).parent().ok_or("Path sumber tidak valid")?;
+    let dest = parent.join(new_name);
+    if sftp.stat(&dest).is_ok() {
+        return Err(format!("Sudah ada \"{}\" di folder ini", new_name));
+    }
+    sftp.rename(Path::new(src), &dest, None)
+        .map_err(|e| format!("Gagal mengganti nama: {}", e))
+}
+
+fn do_delete(sess: &Session, path: &str) -> Result<(), String> {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() || !trimmed.starts_with('/') {
+        return Err("Menolak menghapus path ini".into());
+    }
+    run_sh(sess, &format!("rm -rf -- {}\n", sh_quote(path)), "rm")
+}
+
+/// Folder Unduhan pengguna: xdg-user-dir bila ada, fallback ~/Downloads.
+fn download_dir() -> std::path::PathBuf {
+    use std::process::Command;
+    if let Ok(out) = Command::new("xdg-user-dir").arg("DOWNLOAD").output() {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !p.is_empty() && p != "/" {
+            return std::path::PathBuf::from(p);
+        }
+    }
+    std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+        .join("Downloads")
+}
+
+/// Hindari menimpa: "laporan.txt" yang sudah ada → "laporan (1).txt", dst.
+fn unique_local(dir: &Path, name: &str) -> std::path::PathBuf {
+    let mut cand = dir.join(name);
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{}", e)),
+        _ => (name.to_string(), String::new()),
+    };
+    let mut i = 1;
+    while cand.exists() {
+        cand = dir.join(format!("{} ({}){}", stem, i, ext));
+        i += 1;
+    }
+    cand
+}
+
+fn do_download(sftp: &Sftp, path: &str) -> Result<std::path::PathBuf, String> {
+    let name = Path::new(path)
+        .file_name()
+        .ok_or("Nama file tidak valid")?
+        .to_string_lossy()
+        .into_owned();
+    let dir = download_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let local = unique_local(&dir, &name);
+    let mut remote = sftp
+        .open(Path::new(path))
+        .map_err(|e| format!("Gagal membuka file remote: {}", e))?;
+    let mut file = std::fs::File::create(&local).map_err(|e| e.to_string())?;
+    std::io::copy(&mut remote, &mut file).map_err(|e| format!("Gagal mengunduh file: {}", e))?;
+    Ok(local)
 }
 
 /// Buka file lokal dengan aplikasi default pengguna; kalau tidak ada
-/// asosiasi, jatuh ke text editor.
-fn open_local(path: &Path) -> Result<(), String> {
+/// asosiasi (atau `force_text`), jatuh ke text editor.
+fn open_local(path: &Path, force_text: bool) -> Result<(), String> {
     use std::process::Command;
-    if let Ok(st) = Command::new("xdg-open").arg(path).status() {
-        if st.success() {
-            return Ok(());
+    if !force_text {
+        if let Ok(st) = Command::new("xdg-open").arg(path).status() {
+            if st.success() {
+                return Ok(());
+            }
         }
     }
     // Tidak ada asosiasi MIME: pakai handler text/plain milik pengguna.
@@ -411,6 +537,22 @@ pub async fn panel_open(
                 } => {
                     let _ = reply.send(do_transfer(&sess, &sftp, &src, &dest_dir, mv));
                 }
+                PanelCmd::Mkdir { dir, name, reply } => {
+                    let _ = reply.send(do_mkdir(&sftp, &dir, &name));
+                }
+                PanelCmd::Rename {
+                    src,
+                    new_name,
+                    reply,
+                } => {
+                    let _ = reply.send(do_rename(&sftp, &src, &new_name));
+                }
+                PanelCmd::Delete { path, reply } => {
+                    let _ = reply.send(do_delete(&sess, &path));
+                }
+                PanelCmd::Download { path, reply } => {
+                    let _ = reply.send(do_download(&sftp, &path));
+                }
                 PanelCmd::Close => break,
             }
         }
@@ -465,12 +607,14 @@ pub async fn panel_stats(state: State<'_, PanelState>, id: String) -> Result<Ser
     .map_err(|e| e.to_string())?
 }
 
-/// Unduh file remote lalu buka dengan aplikasi default perangkat pengguna.
+/// Unduh file remote lalu buka dengan aplikasi default perangkat pengguna;
+/// `text_editor` memaksa dibuka dengan text editor.
 #[tauri::command]
 pub async fn panel_open_file(
     state: State<'_, PanelState>,
     id: String,
     path: String,
+    text_editor: bool,
 ) -> Result<(), String> {
     let tx = state
         .conns
@@ -486,7 +630,7 @@ pub async fn panel_open_file(
         let local = rrx
             .recv_timeout(Duration::from_secs(120))
             .map_err(|_| "Waktu habis mengunduh file".to_string())??;
-        open_local(&local)
+        open_local(&local, text_editor)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -524,6 +668,115 @@ pub async fn panel_transfer(
 }
 
 #[tauri::command]
+pub async fn panel_mkdir(
+    state: State<'_, PanelState>,
+    id: String,
+    dir: String,
+    name: String,
+) -> Result<(), String> {
+    let tx = state
+        .conns
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or("Panel tidak tersambung")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (rtx, rrx) = channel();
+        tx.send(PanelCmd::Mkdir {
+            dir,
+            name,
+            reply: rtx,
+        })
+        .map_err(|_| "Panel sudah ditutup".to_string())?;
+        rrx.recv_timeout(Duration::from_secs(30))
+            .map_err(|_| "Waktu habis membuat folder".to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn panel_rename(
+    state: State<'_, PanelState>,
+    id: String,
+    src: String,
+    new_name: String,
+) -> Result<(), String> {
+    let tx = state
+        .conns
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or("Panel tidak tersambung")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (rtx, rrx) = channel();
+        tx.send(PanelCmd::Rename {
+            src,
+            new_name,
+            reply: rtx,
+        })
+        .map_err(|_| "Panel sudah ditutup".to_string())?;
+        rrx.recv_timeout(Duration::from_secs(30))
+            .map_err(|_| "Waktu habis mengganti nama".to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn panel_delete(
+    state: State<'_, PanelState>,
+    id: String,
+    path: String,
+) -> Result<(), String> {
+    let tx = state
+        .conns
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or("Panel tidak tersambung")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (rtx, rrx) = channel();
+        tx.send(PanelCmd::Delete { path, reply: rtx })
+            .map_err(|_| "Panel sudah ditutup".to_string())?;
+        rrx.recv_timeout(Duration::from_secs(120))
+            .map_err(|_| "Waktu habis menghapus".to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Unduh file remote ke folder Unduhan; balas path lokal hasil unduhan.
+#[tauri::command]
+pub async fn panel_download(
+    state: State<'_, PanelState>,
+    id: String,
+    path: String,
+) -> Result<String, String> {
+    let tx = state
+        .conns
+        .lock()
+        .unwrap()
+        .get(&id)
+        .cloned()
+        .ok_or("Panel tidak tersambung")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (rtx, rrx) = channel();
+        tx.send(PanelCmd::Download { path, reply: rtx })
+            .map_err(|_| "Panel sudah ditutup".to_string())?;
+        let local = rrx
+            .recv_timeout(Duration::from_secs(600))
+            .map_err(|_| "Waktu habis mengunduh file".to_string())??;
+        Ok(local.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn panel_close(state: State<'_, PanelState>, id: String) {
     if let Some(tx) = state.conns.lock().unwrap().remove(&id) {
         let _ = tx.send(PanelCmd::Close);
@@ -536,8 +789,10 @@ mod tests {
 
     #[test]
     fn parse_stats_lengkap() {
-        let out = "\n===MEM\nMemTotal:       16334996 kB\nMemAvailable:   9541234 kB\n===DISK\n102400 51200 /\n512000 128000 /data\n===BAT\n87 Charging\n===TEMP\nacpitz 27800\nx86_pkg_temp 54000\nnvme 61000\n===PING\nGG 15.7\nCF 12.34\n";
+        let out = "\n===MEM\nMemTotal:       16334996 kB\nMemAvailable:   9541234 kB\n===DISK\n102400 51200 /\n512000 128000 /data\n===BAT\n87 Charging\n===TEMP\nacpitz 27800\nx86_pkg_temp 54000\nnvme 61000\n===UP\n93784.55 180000.12\n0.84 0.71 0.66 2/401 12345\n===PING\nGG 15.7\nCF 12.34\n";
         let s = parse_stats(out);
+        assert_eq!(s.uptime_s, 93784);
+        assert_eq!(s.load1, Some(0.84));
         // x86_pkg_temp menang atas nvme (61°C) karena prioritas sensor CPU
         assert_eq!(s.temp_c, Some(54.0));
         assert_eq!(s.mem_total_kb, 16334996);
@@ -637,16 +892,57 @@ mod tests {
         .unwrap();
         assert!(dir.join("dir2/berkas.txt").exists());
         assert!(!dir.join("subdir/berkas.txt").exists(), "mv harus memindahkan");
+
+        // Folder baru, ganti nama, hapus (fitur menu klik kanan)
+        super::do_mkdir(&sftp, "/tmp/tambat-e2e-panel", "folder baru").unwrap();
+        assert!(dir.join("folder baru").is_dir());
+        assert!(
+            super::do_mkdir(&sftp, "/tmp/tambat-e2e-panel", "a/b").is_err(),
+            "nama folder dengan '/' harus ditolak"
+        );
+
+        super::do_rename(&sftp, "/tmp/tambat-e2e-panel/berkas.txt", "riwayat.txt").unwrap();
+        assert!(dir.join("riwayat.txt").exists());
+        assert!(!dir.join("berkas.txt").exists());
+        assert!(
+            super::do_rename(&sftp, "/tmp/tambat-e2e-panel/riwayat.txt", "riwayat.txt").is_err(),
+            "nama tujuan yang sudah ada harus ditolak"
+        );
+
+        super::do_delete(&sess, "/tmp/tambat-e2e-panel/dir2").unwrap();
+        assert!(!dir.join("dir2").exists(), "rm -rf harus menghapus folder beserta isinya");
+        assert!(
+            super::do_delete(&sess, "relatif/path").is_err(),
+            "path relatif harus ditolak"
+        );
+    }
+
+    #[test]
+    fn unique_local_menghindari_timpa() {
+        let dir = std::path::Path::new("/tmp/tambat-uji-unique");
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).unwrap();
+        assert_eq!(super::unique_local(dir, "a.txt"), dir.join("a.txt"));
+        std::fs::write(dir.join("a.txt"), b"").unwrap();
+        assert_eq!(super::unique_local(dir, "a.txt"), dir.join("a (1).txt"));
+        std::fs::write(dir.join("a (1).txt"), b"").unwrap();
+        assert_eq!(super::unique_local(dir, "a.txt"), dir.join("a (2).txt"));
+        // file tersembunyi: titik di awal bukan pemisah ekstensi
+        std::fs::write(dir.join(".bashrc"), b"").unwrap();
+        assert_eq!(super::unique_local(dir, ".bashrc"), dir.join(".bashrc (1)"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn parse_stats_tanpa_baterai_dan_ping_timeout() {
-        let out = "===MEM\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===DISK\n===BAT\n===TEMP\n===PING\n";
+        let out = "===MEM\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===DISK\n===BAT\n===TEMP\n===UP\n===PING\n";
         let s = parse_stats(out);
         assert!(s.battery.is_none());
         assert!(s.disks.is_empty());
         assert_eq!(s.ping_cf_ms, None);
         assert_eq!(s.ping_google_ms, None);
         assert_eq!(s.temp_c, None);
+        assert_eq!(s.uptime_s, 0);
+        assert_eq!(s.load1, None);
     }
 }

@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { JSX, ReactNode } from "react";
 import {
   panelClose,
+  panelDelete,
+  panelDownload,
   panelList,
+  panelMkdir,
   panelOpen,
   panelOpenFile,
+  panelRename,
   panelStats,
   panelTransfer,
 } from "../api";
@@ -100,6 +104,22 @@ const IC_BAT = (
     <rect x="3.2" y="6.7" width="3.4" height="2.6" fill="currentColor" />
   </svg>
 );
+const IC_UPTIME = (
+  <svg viewBox="0 0 16 16">
+    <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    <path d="M8 4.6V8l2.4 1.6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+
+/** "93784 detik" → "1h 2j"; di bawah sehari "2j 3m"; di bawah sejam "42m". */
+function fmtUptime(s: number): string {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}h ${h}j`;
+  if (h > 0) return `${h}j ${m}m`;
+  return `${m}m`;
+}
 
 function Chip({
   icon,
@@ -143,23 +163,28 @@ function levelOf(ms: number | null): 0 | 1 | 2 | 3 | 4 {
   return 1;
 }
 
-function PingRow({ label, ms }: { label: string; ms: number | null }) {
+const SIG_LABEL = ["timeout", "lemah", "sedang", "bagus", "sangat bagus"];
+
+/** Chip sinyal: bar 4-tingkat + latensi "xx ms". Ping ke 1.1.1.1. */
+function PingChip({ ms }: { ms: number | null }) {
   const level = levelOf(ms);
   const cls = level >= 3 ? " sig--ok" : level === 2 ? " sig--warn" : " sig--bad";
   return (
-    <div className="ping-row">
-      <span className="stat-label">{label}</span>
-      <span className={"ping-right" + cls}>
-        <span className="sig" aria-hidden="true">
-          {[1, 2, 3, 4].map((i) => (
-            <span
-              key={i}
-              className={"sig-bar" + (i <= level ? " sig-bar--on" : "")}
-              style={{ height: 3 + i * 2.5 }}
-            />
-          ))}
-        </span>
-        <span className="ping-val">{ms === null ? "timeout" : `${ms.toFixed(1)} ms`}</span>
+    <div
+      className="chip"
+      title={`Ping 1.1.1.1: ${ms === null ? "timeout" : `${ms.toFixed(1)} ms`} — sinyal ${SIG_LABEL[level]}`}
+    >
+      <span className={"chip-icon sig" + cls}>
+        {[1, 2, 3, 4].map((i) => (
+          <span
+            key={i}
+            className={"sig-bar" + (i <= level ? " sig-bar--on" : "")}
+            style={{ height: 3 + i * 3 }}
+          />
+        ))}
+      </span>
+      <span className="chip-body">
+        <span className="chip-text">{ms === null ? "timeout" : `${Math.round(ms)} ms`}</span>
       </span>
     </div>
   );
@@ -188,6 +213,22 @@ export default function FilePanel({ tab, active }: Props) {
   /** "clipboard" salin/potong file remote, per tab */
   const [clip, setClip] = useState<{ path: string; mv: boolean } | null>(null);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
+  /** dialog kecil: ganti nama / folder baru / konfirmasi hapus */
+  const [ask, setAsk] = useState<
+    | { kind: "rename"; entry: DirEntry; value: string }
+    | { kind: "mkdir"; value: string }
+    | { kind: "delete"; entry: DirEntry }
+    | null
+  >(null);
+  /** pesan sukses sementara (mis. lokasi hasil unduhan) */
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
+  const showNotice = (s: string) => {
+    setNotice(s);
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 6000);
+  };
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
   const activeRef = useRef(active);
   activeRef.current = active;
 
@@ -258,12 +299,55 @@ export default function FilePanel({ tab, active }: Props) {
     }
   };
 
-  const openFile = async (en: DirEntry) => {
+  const openFile = async (en: DirEntry, textEditor = false) => {
     if (!listing) return;
     setBusyMsg(`membuka ${en.name}…`);
     try {
-      await panelOpenFile(panelId, joinPath(listing.path, en.name));
+      await panelOpenFile(panelId, joinPath(listing.path, en.name), textEditor);
       setError(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyMsg(null);
+    }
+  };
+
+  const download = async (en: DirEntry) => {
+    if (!listing) return;
+    setBusyMsg(`mengunduh ${en.name}…`);
+    try {
+      const local = await panelDownload(panelId, joinPath(listing.path, en.name));
+      setError(null);
+      showNotice(`Tersimpan di ${local}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyMsg(null);
+    }
+  };
+
+  /** Eksekusi dialog `ask` (ganti nama / folder baru / hapus). */
+  const submitAsk = async () => {
+    if (!ask || !listing) return;
+    const a = ask;
+    setAsk(null);
+    setBusyMsg(
+      a.kind === "rename"
+        ? "mengganti nama…"
+        : a.kind === "mkdir"
+          ? "membuat folder…"
+          : `menghapus ${a.entry.name}…`,
+    );
+    try {
+      if (a.kind === "rename") {
+        await panelRename(panelId, joinPath(listing.path, a.entry.name), a.value.trim());
+      } else if (a.kind === "mkdir") {
+        await panelMkdir(panelId, listing.path, a.value.trim());
+      } else {
+        await panelDelete(panelId, joinPath(listing.path, a.entry.name));
+      }
+      setError(null);
+      await navigate(listing.path);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -345,6 +429,7 @@ export default function FilePanel({ tab, active }: Props) {
         }}
       />
       {error && <div className="fpanel-err fpanel-err--inline">{error}</div>}
+      {notice && <div className="fpanel-note">{notice}</div>}
 
       <div
         className="fpanel-list"
@@ -391,8 +476,8 @@ export default function FilePanel({ tab, active }: Props) {
           <div
             className="ctx-menu"
             style={{
-              left: Math.min(menu.x, window.innerWidth - 190),
-              top: Math.min(menu.y, window.innerHeight - 230),
+              left: Math.min(menu.x, window.innerWidth - 210),
+              top: Math.min(menu.y, window.innerHeight - 380),
             }}
           >
             {menu.entry && (
@@ -408,6 +493,31 @@ export default function FilePanel({ tab, active }: Props) {
                 >
                   Buka
                 </div>
+                {!menu.entry.isDir && (
+                  <>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        const en = menu.entry!;
+                        setMenu(null);
+                        openFile(en, true);
+                      }}
+                    >
+                      Buka dengan editor teks
+                    </div>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        const en = menu.entry!;
+                        setMenu(null);
+                        download(en);
+                      }}
+                    >
+                      Unduh ke folder Unduhan
+                    </div>
+                  </>
+                )}
+                <div className="ctx-sep" />
                 <div
                   className="ctx-item"
                   onClick={() => {
@@ -445,18 +555,50 @@ export default function FilePanel({ tab, active }: Props) {
                   Salin nama
                 </div>
                 <div className="ctx-sep" />
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    const en = menu.entry!;
+                    setMenu(null);
+                    setAsk({ kind: "rename", entry: en, value: en.name });
+                  }}
+                >
+                  Ganti nama…
+                </div>
+                <div
+                  className="ctx-item ctx-item--danger"
+                  onClick={() => {
+                    const en = menu.entry!;
+                    setMenu(null);
+                    setAsk({ kind: "delete", entry: en });
+                  }}
+                >
+                  Hapus…
+                </div>
+                <div className="ctx-sep" />
               </>
             )}
             {!menu.entry && (
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  copyText(listing.path);
-                  setMenu(null);
-                }}
-              >
-                Salin path folder
-              </div>
+              <>
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    setMenu(null);
+                    setAsk({ kind: "mkdir", value: "" });
+                  }}
+                >
+                  Folder baru…
+                </div>
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    copyText(listing.path);
+                    setMenu(null);
+                  }}
+                >
+                  Salin path folder
+                </div>
+              </>
             )}
             <div
               className={"ctx-item" + (clip ? "" : " ctx-item--dis")}
@@ -478,6 +620,54 @@ export default function FilePanel({ tab, active }: Props) {
             >
               Muat ulang
             </div>
+          </div>
+        </div>
+      )}
+
+      {ask && (
+        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setAsk(null)}>
+          <div className="modal modal--narrow">
+            {ask.kind === "delete" ? (
+              <>
+                <h2 className="modal-title">Hapus {ask.entry.isDir ? "folder" : "file"}?</h2>
+                <p className="modal-text">
+                  "{ask.entry.name}" akan dihapus permanen dari server
+                  {ask.entry.isDir ? " beserta seluruh isinya" : ""}.
+                </p>
+                <div className="modal-actions">
+                  <button className="btn" onClick={() => setAsk(null)}>
+                    Batal
+                  </button>
+                  <button className="btn btn--danger" onClick={submitAsk}>
+                    Hapus
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="modal-title">
+                  {ask.kind === "rename" ? `Ganti nama "${ask.entry.name}"` : "Folder baru"}
+                </h2>
+                <label className="field">
+                  <input
+                    value={ask.value}
+                    autoFocus
+                    spellCheck={false}
+                    placeholder={ask.kind === "mkdir" ? "nama folder" : "nama baru"}
+                    onChange={(e) => setAsk({ ...ask, value: e.target.value })}
+                    onKeyDown={(e) => e.key === "Enter" && ask.value.trim() && submitAsk()}
+                  />
+                </label>
+                <div className="modal-actions">
+                  <button className="btn" onClick={() => setAsk(null)}>
+                    Batal
+                  </button>
+                  <button className="btn btn--primary" disabled={!ask.value.trim()} onClick={submitAsk}>
+                    {ask.kind === "rename" ? "Ganti nama" : "Buat"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -538,6 +728,17 @@ export default function FilePanel({ tab, active }: Props) {
                   }`}
                 />
               )}
+              {!stats.battery && stats.uptimeS > 0 && (
+                <Chip
+                  icon={IC_UPTIME}
+                  text={fmtUptime(stats.uptimeS)}
+                  title={
+                    `Server menyala ${fmtUptime(stats.uptimeS)}` +
+                    (stats.load1 !== null ? ` · load 1 menit ${stats.load1}` : "")
+                  }
+                />
+              )}
+              <PingChip ms={stats.pingCfMs} />
             </div>
 
             {diskMenu && (
@@ -570,8 +771,6 @@ export default function FilePanel({ tab, active }: Props) {
               </div>
             )}
 
-            <PingRow label="1.1.1.1" ms={stats.pingCfMs} />
-            <PingRow label="8.8.8.8" ms={stats.pingGoogleMs} />
           </>
         )}
       </div>

@@ -56,6 +56,10 @@ export interface ServerStats {
   pingGoogleMs: number | null;
   /** suhu CPU/SoC dalam °C, null jika tidak ada sensor */
   tempC: number | null;
+  /** lama server menyala, detik; 0 = tidak terbaca */
+  uptimeS: number;
+  /** load average 1 menit */
+  load1: number | null;
 }
 
 export interface Tab {
