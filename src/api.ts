@@ -1,5 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ConnectParams, DirListing, Host, ServerStats } from "./types";
+import type { ConnectParams, DirListing, Host, ServerStats, Tab } from "./types";
+
+/** Parameter koneksi dari sebuah tab: kredensial yang dikirim tergantung authType-nya. */
+export function connectParamsFor(tab: Tab, cols: number, rows: number): ConnectParams {
+  return {
+    host: tab.host.host,
+    port: tab.host.port,
+    username: tab.host.username,
+    authType: tab.host.authType,
+    password: tab.host.authType === "password" ? tab.secret : undefined,
+    keyPath: tab.host.keyPath ?? undefined,
+    keyPassphrase: tab.host.authType === "key" ? tab.secret : undefined,
+    cols,
+    rows,
+  };
+}
 
 // ---- SSH ----
 export const sshConnect = (id: string, params: ConnectParams) =>

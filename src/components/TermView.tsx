@@ -4,7 +4,15 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
-import { b64ToBytes, sshConnect, sshDisconnect, sshResize, sshSend, strToB64 } from "../api";
+import {
+  b64ToBytes,
+  connectParamsFor,
+  sshConnect,
+  sshDisconnect,
+  sshResize,
+  sshSend,
+  strToB64,
+} from "../api";
 import type { Tab, TabStatus } from "../types";
 
 const TERM_THEME = {
@@ -98,17 +106,7 @@ export default function TermView({ tab, active, onStatus, onCwd }: Props) {
           onStatus(tab.tabId, "closed", e.payload);
         });
 
-        await sshConnect(connId, {
-          host: tab.host.host,
-          port: tab.host.port,
-          username: tab.host.username,
-          authType: tab.host.authType,
-          password: tab.host.authType === "password" ? tab.secret : undefined,
-          keyPath: tab.host.keyPath ?? undefined,
-          keyPassphrase: tab.host.authType === "key" ? tab.secret : undefined,
-          cols: term.cols,
-          rows: term.rows,
-        });
+        await sshConnect(connId, connectParamsFor(tab, term.cols, term.rows));
         if (disposed) {
           sshDisconnect(connId).catch(() => {});
           return;

@@ -563,48 +563,63 @@ pub async fn panel_open(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn panel_list(
-    state: State<'_, PanelState>,
-    id: String,
-    path: String,
-) -> Result<DirListing, String> {
+/// Kirim satu perintah ke worker panel dan tunggu balasannya; menyeragamkan
+/// pola lock→ambil sender→spawn_blocking→kirim→timeout yang dipakai semua
+/// command panel_* di bawah.
+async fn dispatch<T, F>(
+    state: &State<'_, PanelState>,
+    id: &str,
+    timeout: Duration,
+    timeout_msg: &'static str,
+    make_cmd: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(Sender<Result<T, String>>) -> PanelCmd + Send + 'static,
+{
     let tx = state
         .conns
         .lock()
         .unwrap()
-        .get(&id)
+        .get(id)
         .cloned()
         .ok_or("Panel tidak tersambung")?;
     tauri::async_runtime::spawn_blocking(move || {
         let (rtx, rrx) = channel();
-        tx.send(PanelCmd::List { path, reply: rtx })
+        tx.send(make_cmd(rtx))
             .map_err(|_| "Panel sudah ditutup".to_string())?;
-        rrx.recv_timeout(Duration::from_secs(30))
-            .map_err(|_| "Waktu habis membaca folder".to_string())?
+        rrx.recv_timeout(timeout).map_err(|_| timeout_msg.to_string())?
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn panel_stats(state: State<'_, PanelState>, id: String) -> Result<ServerStats, String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Stats { reply: rtx })
-            .map_err(|_| "Panel sudah ditutup".to_string())?;
-        rrx.recv_timeout(Duration::from_secs(20))
-            .map_err(|_| "Waktu habis membaca statistik".to_string())?
-    })
+pub async fn panel_list(
+    state: State<'_, PanelState>,
+    id: String,
+    path: String,
+) -> Result<DirListing, String> {
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(30),
+        "Waktu habis membaca folder",
+        |reply: Sender<Result<DirListing, String>>| PanelCmd::List { path, reply },
+    )
     .await
-    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn panel_stats(state: State<'_, PanelState>, id: String) -> Result<ServerStats, String> {
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(20),
+        "Waktu habis membaca statistik",
+        |reply: Sender<Result<ServerStats, String>>| PanelCmd::Stats { reply },
+    )
+    .await
 }
 
 /// Unduh file remote lalu buka dengan aplikasi default perangkat pengguna;
@@ -616,24 +631,17 @@ pub async fn panel_open_file(
     path: String,
     text_editor: bool,
 ) -> Result<(), String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Fetch { path, reply: rtx })
-            .map_err(|_| "Panel sudah ditutup".to_string())?;
-        let local = rrx
-            .recv_timeout(Duration::from_secs(120))
-            .map_err(|_| "Waktu habis mengunduh file".to_string())??;
-        open_local(&local, text_editor)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let local = dispatch(
+        &state,
+        &id,
+        Duration::from_secs(120),
+        "Waktu habis mengunduh file",
+        |reply: Sender<Result<std::path::PathBuf, String>>| PanelCmd::Fetch { path, reply },
+    )
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || open_local(&local, text_editor))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -644,27 +652,19 @@ pub async fn panel_transfer(
     dest_dir: String,
     mv: bool,
 ) -> Result<(), String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Transfer {
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(300),
+        "Waktu habis menyalin/memindahkan",
+        move |reply: Sender<Result<(), String>>| PanelCmd::Transfer {
             src,
             dest_dir,
             mv,
-            reply: rtx,
-        })
-        .map_err(|_| "Panel sudah ditutup".to_string())?;
-        rrx.recv_timeout(Duration::from_secs(300))
-            .map_err(|_| "Waktu habis menyalin/memindahkan".to_string())?
-    })
+            reply,
+        },
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -674,26 +674,14 @@ pub async fn panel_mkdir(
     dir: String,
     name: String,
 ) -> Result<(), String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Mkdir {
-            dir,
-            name,
-            reply: rtx,
-        })
-        .map_err(|_| "Panel sudah ditutup".to_string())?;
-        rrx.recv_timeout(Duration::from_secs(30))
-            .map_err(|_| "Waktu habis membuat folder".to_string())?
-    })
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(30),
+        "Waktu habis membuat folder",
+        |reply: Sender<Result<(), String>>| PanelCmd::Mkdir { dir, name, reply },
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -703,26 +691,18 @@ pub async fn panel_rename(
     src: String,
     new_name: String,
 ) -> Result<(), String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Rename {
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(30),
+        "Waktu habis mengganti nama",
+        |reply: Sender<Result<(), String>>| PanelCmd::Rename {
             src,
             new_name,
-            reply: rtx,
-        })
-        .map_err(|_| "Panel sudah ditutup".to_string())?;
-        rrx.recv_timeout(Duration::from_secs(30))
-            .map_err(|_| "Waktu habis mengganti nama".to_string())?
-    })
+            reply,
+        },
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -731,22 +711,14 @@ pub async fn panel_delete(
     id: String,
     path: String,
 ) -> Result<(), String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Delete { path, reply: rtx })
-            .map_err(|_| "Panel sudah ditutup".to_string())?;
-        rrx.recv_timeout(Duration::from_secs(120))
-            .map_err(|_| "Waktu habis menghapus".to_string())?
-    })
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(120),
+        "Waktu habis menghapus",
+        |reply: Sender<Result<(), String>>| PanelCmd::Delete { path, reply },
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Unduh file remote ke folder Unduhan; balas path lokal hasil unduhan.
@@ -756,24 +728,15 @@ pub async fn panel_download(
     id: String,
     path: String,
 ) -> Result<String, String> {
-    let tx = state
-        .conns
-        .lock()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or("Panel tidak tersambung")?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let (rtx, rrx) = channel();
-        tx.send(PanelCmd::Download { path, reply: rtx })
-            .map_err(|_| "Panel sudah ditutup".to_string())?;
-        let local = rrx
-            .recv_timeout(Duration::from_secs(600))
-            .map_err(|_| "Waktu habis mengunduh file".to_string())??;
-        Ok(local.to_string_lossy().into_owned())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let local = dispatch(
+        &state,
+        &id,
+        Duration::from_secs(600),
+        "Waktu habis mengunduh file",
+        |reply: Sender<Result<std::path::PathBuf, String>>| PanelCmd::Download { path, reply },
+    )
+    .await?;
+    Ok(local.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

@@ -1,0 +1,72 @@
+import type { DiskUsage } from "./types";
+
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+/** Format ringkas untuk chip: 3.4G, 512M, 98G */
+export function fmtShort(kb: number): string {
+  const units = ["K", "M", "G", "T"];
+  let v = kb;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)}${units[i]}`;
+}
+
+export const BAT_STATUS: Record<string, string> = {
+  Charging: "mengisi",
+  Discharging: "melepas",
+  Full: "penuh",
+  "Not charging": "tidak mengisi",
+};
+
+export function joinPath(dir: string, name: string) {
+  return dir === "/" ? `/${name}` : `${dir}/${name}`;
+}
+
+/** Partisi yang memuat `path`: mount dengan prefix terpanjang. */
+export function diskOfPath(disks: DiskUsage[], path: string): DiskUsage | null {
+  let best: DiskUsage | null = null;
+  for (const d of disks) {
+    const m = d.mount.endsWith("/") ? d.mount.slice(0, -1) : d.mount;
+    if (path === m || m === "" || path.startsWith(m + "/")) {
+      if (!best || m.length > best.mount.length) best = d;
+    }
+  }
+  return best ?? disks[0] ?? null;
+}
+
+export const usageCls = (pct: number) =>
+  pct >= 90 ? "chip-fill--crit" : pct >= 70 ? "chip-fill--warn" : "";
+
+/** Level sinyal dari latensi: 4=sangat bagus … 1=lemah, 0=timeout. */
+export function levelOf(ms: number | null): 0 | 1 | 2 | 3 | 4 {
+  if (ms === null) return 0;
+  if (ms <= 30) return 4;
+  if (ms <= 80) return 3;
+  if (ms <= 200) return 2;
+  return 1;
+}
+
+export const SIG_LABEL = ["timeout", "lemah", "sedang", "bagus", "sangat bagus"];
+
+/** "93784 detik" → "1h 2j"; di bawah sehari "2j 3m"; di bawah sejam "42m". */
+export function fmtUptime(s: number): string {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}h ${h}j`;
+  if (h > 0) return `${h}j ${m}m`;
+  return `${m}m`;
+}
