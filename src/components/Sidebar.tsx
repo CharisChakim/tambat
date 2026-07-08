@@ -23,8 +23,22 @@ export default function Sidebar({ hosts, onConnect, onEdit, onDelete, onAdd }: P
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">tambat</span>
-        <span className="brand-cursor">_</span>
+        <span className="brand-text">
+          <span className="brand-mark">tambat</span>
+          <span className="brand-cursor">_</span>
+        </span>
+        <svg className="brand-logo" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="3.4" r="1.4" fill="currentColor" />
+          <path d="M8 4.9V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <path d="M5.4 6.6h5.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <path
+            d="M4 9.2a4 4 0 0 0 8 0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+          />
+        </svg>
       </div>
 
       <input

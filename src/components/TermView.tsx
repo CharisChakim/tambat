@@ -31,13 +31,18 @@ const TERM_THEME = {
   brightWhite: "#f2f8fb",
 };
 
+/** OSC 7 dikirim shell sebagai "file://hostname/path/absolut" */
+const OSC7_RE = /^file:\/\/[^/]*(\/.*)$/;
+
 interface Props {
   tab: Tab;
   active: boolean;
   onStatus: (tabId: string, status: TabStatus, message?: string) => void;
+  /** dipanggil setiap shell melaporkan direktori kerja baru (lihat OSC7_RE) */
+  onCwd?: (path: string) => void;
 }
 
-export default function TermView({ tab, active, onStatus }: Props) {
+export default function TermView({ tab, active, onStatus, onCwd }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const connIdRef = useRef<string | null>(null);
@@ -63,6 +68,12 @@ export default function TermView({ tab, active, onStatus }: Props) {
     fit.fit();
     fitRef.current = fit;
     term.focus();
+
+    const oscHandler = term.parser.registerOscHandler(7, (data) => {
+      const m = OSC7_RE.exec(data);
+      if (m) onCwd?.(m[1]);
+      return true;
+    });
 
     let disposed = false;
     let unData: UnlistenFn | null = null;
@@ -129,6 +140,7 @@ export default function TermView({ tab, active, onStatus }: Props) {
     return () => {
       disposed = true;
       ro.disconnect();
+      oscHandler.dispose();
       unData?.();
       unExit?.();
       const id = connIdRef.current;

@@ -193,11 +193,13 @@ function PingChip({ ms }: { ms: number | null }) {
 interface Props {
   tab: Tab;
   active: boolean;
+  /** direktori kerja shell saat ini (dari OSC 7 terminal); panel mengikutinya */
+  cwd?: string;
 }
 
 /** Panel ala MobaXterm: file browser SFTP + statistik server (RAM, disk,
  *  suhu, baterai, ping). Memakai sesi SSH kedua, terpisah dari terminal. */
-export default function FilePanel({ tab, active }: Props) {
+export default function FilePanel({ tab, active, cwd }: Props) {
   const panelId = `panel-${tab.tabId}-${tab.attempt}`;
   const [listing, setListing] = useState<DirListing | null>(null);
   const [pathInput, setPathInput] = useState("");
@@ -298,6 +300,14 @@ export default function FilePanel({ tab, active }: Props) {
       setLoading(false);
     }
   };
+
+  // Ikuti pwd terminal: setiap `cwd` berubah (atau begitu listing awal siap),
+  // pindah ke sana kalau belum di situ.
+  useEffect(() => {
+    if (!cwd || !listing || cwd === listing.path) return;
+    navigate(cwd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cwd, listing]);
 
   const openFile = async (en: DirEntry, textEditor = false) => {
     if (!listing) return;

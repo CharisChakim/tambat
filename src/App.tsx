@@ -31,6 +31,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [formHost, setFormHost] = useState<Host | null | undefined>(undefined); // undefined = tertutup
   const [showPanel, setShowPanel] = useState(true);
+  /** direktori kerja shell tiap tab, dilaporkan live oleh TermView lewat OSC 7 */
+  const [cwd, setCwd] = useState<Record<string, string>>({});
   const [prompt, setPrompt] = useState<{ host: Host; kind: "password" | "passphrase" } | null>(
     null,
   );
@@ -220,7 +222,7 @@ export default function App() {
               }
             >
               {showPanel && t.status === "open" && (
-                <FilePanel tab={t} active={t.tabId === activeTab} />
+                <FilePanel tab={t} active={t.tabId === activeTab} cwd={cwd[t.tabId]} />
               )}
               <div className="workspace-term">
                 <TermView
@@ -228,6 +230,7 @@ export default function App() {
                   tab={t}
                   active={t.tabId === activeTab}
                   onStatus={onStatus}
+                  onCwd={(path) => setCwd((c) => (c[t.tabId] === path ? c : { ...c, [t.tabId]: path }))}
                 />
               </div>
             </div>
