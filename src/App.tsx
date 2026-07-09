@@ -227,6 +227,14 @@ export default function App() {
           {tabs.length === 0 && (
             <div className="welcome">
               <Logo className="welcome-logo" />
+              <div className="welcome-tag">
+                Tambatkan ip mu
+                <span className="sig" aria-hidden="true">
+                  <span>_</span>
+                  <span>_</span>
+                  <span>_</span>
+                </span>
+              </div>
               <p>Pilih host di sisi kiri untuk menambatkan sesi baru,</p>
               <p>
                 atau tekan <kbd>/</kbd> untuk mencari.
