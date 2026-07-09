@@ -1,4 +1,8 @@
-# ⚓ Tambat
+<p align="center">
+  <img src="docs/logo.svg" alt="Logo Tambat — jangkar menambat ke server" width="150">
+</p>
+
+# Tambat
 
 **SSH client desktop yang ringan, aman, dan enak dipakai** — terminal, file
 manager (SFTP), dan monitor server jadi satu, berdampingan di tiap tab.
