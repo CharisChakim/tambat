@@ -67,17 +67,38 @@ export default function Sidebar({
           <span className="brand-mark">tambat</span>
           <span className="brand-cursor">_</span>
         </span>
-        <svg className="brand-logo" viewBox="0 0 16 16" aria-hidden="true">
-          <circle cx="8" cy="3.4" r="1.4" fill="currentColor" />
-          <path d="M8 4.9V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          <path d="M5.4 6.6h5.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          <path
-            d="M4 9.2a4 4 0 0 0 8 0"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            strokeLinecap="round"
-          />
+        {/* Logo "Tambat": jangkar miring, tali melilit batangnya lalu menambat
+            ke sebuah server (titik hijau = online) — sesi ditautkan ke seberang. */}
+        <svg
+          className="brand-logo"
+          viewBox="0 0 46 32"
+          aria-hidden="true"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <g transform="rotate(-20 14 16)">
+            <g stroke="currentColor" strokeWidth="2.1">
+              <circle cx="14" cy="5" r="2.2" />
+              <line x1="14" y1="7.2" x2="14" y2="25" />
+              <line x1="8.4" y1="10.2" x2="19.6" y2="10.2" />
+              <path d="M5 17.4C5 23.8 9.2 26.6 14 26.6 18.8 26.6 23 23.8 23 17.4" />
+              <path d="M5 17.4 2.4 16.3M5 17.4 4.7 20.2" />
+              <path d="M23 17.4 25.6 16.3M23 17.4 23.3 20.2" />
+            </g>
+            <path
+              d="M9.6 12.4C9.6 10.8 18.4 10.8 18.4 12.8 18.4 14.8 9.6 14.8 9.6 16.8 9.6 18.6 18.4 18.6 18.4 16.9"
+              stroke="#d9a86b"
+              strokeWidth="1.8"
+            />
+          </g>
+          <path d="M23 23.4C28 27 31.5 22.5 35 24.2" stroke="#d9a86b" strokeWidth="1.9" />
+          <g stroke="currentColor" strokeWidth="1.7">
+            <rect x="34" y="19.5" width="9" height="10" rx="1.8" />
+            <line x1="36" y1="22.6" x2="41" y2="22.6" />
+            <line x1="36" y1="26.4" x2="41" y2="26.4" />
+          </g>
+          <circle cx="37" cy="24.5" r="0.85" fill="#4fbf8b" />
         </svg>
         <button className="rail-toggle" title="Ciutkan daftar host" onClick={onToggleCollapse}>
           ‹
