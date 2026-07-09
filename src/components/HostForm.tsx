@@ -3,7 +3,8 @@ import type { AuthType, Host } from "../types";
 
 interface Props {
   initial: Host | null;
-  onSave: (host: Host) => void;
+  /** `secret` hanya dikirim saat menambah host baru (mode quick-connect). */
+  onSave: (host: Host, secret?: string) => void;
   onClose: () => void;
 }
 
@@ -18,7 +19,8 @@ const EMPTY: Host = {
 };
 
 export default function HostForm({ initial, onSave, onClose }: Props) {
-  const [form, setForm] = useState<Host>(initial ?? EMPTY);
+  const [form, setForm] = useState<Host>(() => initial ?? { ...EMPTY, id: crypto.randomUUID() });
+  const [secret, setSecret] = useState("");
   const [err, setErr] = useState("");
 
   const set = <K extends keyof Host>(k: K, v: Host[K]) =>
@@ -31,13 +33,15 @@ export default function HostForm({ initial, onSave, onClose }: Props) {
     if (!form.username.trim()) return setErr("Username wajib diisi.");
     if (form.authType === "key" && !(form.keyPath ?? "").trim())
       return setErr("Path private key wajib diisi untuk auth key.");
-    onSave({
+    const built: Host = {
       ...form,
       label: form.label.trim() || host,
       host,
       username: form.username.trim(),
       keyPath: form.authType === "key" ? (form.keyPath ?? "").trim() : null,
-    });
+    };
+    if (initial) return onSave(built);
+    onSave(built, secret);
   };
 
   return (
@@ -108,6 +112,20 @@ export default function HostForm({ initial, onSave, onClose }: Props) {
           </label>
         )}
 
+        {!initial && form.authType !== "agent" && (
+          <label className="field">
+            <span>{form.authType === "password" ? "Password" : "Passphrase key"}</span>
+            <input
+              type="password"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder={
+                form.authType === "password" ? "Masukkan password" : "Kosongkan jika key tanpa passphrase"
+              }
+            />
+          </label>
+        )}
+
         {err && <div className="form-err">{err}</div>}
 
         <div className="modal-actions">
@@ -115,7 +133,7 @@ export default function HostForm({ initial, onSave, onClose }: Props) {
             Batal
           </button>
           <button className="btn btn--primary" onClick={submit}>
-            Simpan
+            {initial ? "Simpan" : "Tambat"}
           </button>
         </div>
       </div>

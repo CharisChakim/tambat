@@ -6,6 +6,7 @@ mod ssh;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(ssh::SshState::default())
         .manage(panel::PanelState::default())
         .invoke_handler(tauri::generate_handler![
@@ -25,6 +26,7 @@ pub fn run() {
             panel::panel_rename,
             panel::panel_delete,
             panel::panel_download,
+            panel::panel_upload,
             panel::panel_close,
             secrets::secret_set,
             secrets::secret_get,

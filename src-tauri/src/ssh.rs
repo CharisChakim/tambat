@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::Deserialize;
-use ssh2::Session;
+use ssh2::{PtyModeOpcode, PtyModes, Session};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -154,9 +154,14 @@ pub async fn ssh_connect(
         let mut ch = sess
             .channel_session()
             .map_err(|e| format!("Gagal membuka channel: {}", e))?;
+        // Mulai PTY dengan ECHO mati supaya snippet integrasi shell (di bawah)
+        // tidak ter-echo ke layar saat dikirim. Snippet akan menyalakan echo
+        // kembali (`stty echo`) di akhir untuk input pengguna berikutnya.
+        let mut modes = PtyModes::new();
+        modes.set_boolean(PtyModeOpcode::ECHO, false);
         ch.request_pty(
             "xterm-256color",
-            None,
+            Some(modes),
             Some((params.cols, params.rows, 0, 0)),
         )
         .map_err(|e| format!("Gagal meminta PTY: {}", e))?;
@@ -170,7 +175,7 @@ pub async fn ssh_connect(
         // Sintaks array bash/zsh (`+=(...)`) ditaruh dalam `eval` string tunggal-kutip
         // supaya shell POSIX polos (dash/ash) tidak ikut mem-parsingnya sama sekali —
         // tanpa ini, shell login yang bukan bash/zsh gagal parse dan menampilkan error.
-        let osc7_setup = r#"if [ -n "$ZSH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "${precmd_functions[*]-}" in *__tambat_osc7*) ;; *) precmd_functions+=(__tambat_osc7);; esac'; elif [ -n "$BASH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "$PROMPT_COMMAND" in *__tambat_osc7*) ;; *) PROMPT_COMMAND="__tambat_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}";; esac'; fi; type __tambat_osc7 >/dev/null 2>&1 && __tambat_osc7
+        let osc7_setup = r#"if [ -n "$ZSH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "${precmd_functions[*]-}" in *__tambat_osc7*) ;; *) precmd_functions+=(__tambat_osc7);; esac'; elif [ -n "$BASH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "$PROMPT_COMMAND" in *__tambat_osc7*) ;; *) PROMPT_COMMAND="__tambat_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}";; esac'; fi; type __tambat_osc7 >/dev/null 2>&1 && __tambat_osc7; stty echo 2>/dev/null
 "#;
         let _ = ch.write_all(osc7_setup.as_bytes());
 

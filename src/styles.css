@@ -71,6 +71,7 @@ body {
   padding: 8px 10px;
 }
 .brand-text {
+  flex: 1;
   font-family: var(--mono);
   font-size: 20px;
   letter-spacing: 0.04em;
@@ -157,6 +158,62 @@ body {
 }
 .host-auth {
   color: #7f95a3;
+}
+
+/* ── Sidebar menciut (rail sempit) ── */
+.rail-toggle {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.rail-toggle:hover {
+  color: var(--text);
+  background: var(--line);
+}
+.sidebar--rail {
+  width: 56px;
+  min-width: 56px;
+  padding: 14px 8px;
+  align-items: center;
+  gap: 10px;
+}
+.sidebar--rail .rail-toggle {
+  font-size: 20px;
+}
+.host-list--rail {
+  align-items: center;
+  gap: 8px;
+}
+.host-rail {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.host-rail:hover {
+  border-color: var(--lamp);
+  color: var(--lamp);
+}
+.rail-add {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
 }
 .host-actions {
   display: none;
@@ -363,8 +420,8 @@ body {
 
 /* ── Panel file (ala MobaXterm) ── */
 .fpanel {
-  width: 272px;
-  min-width: 272px;
+  width: 320px;
+  min-width: 320px;
   background: var(--panel);
   border-right: 1px solid var(--line);
   display: flex;
@@ -381,6 +438,11 @@ body {
   font-size: 17px;
   padding: 4px 9px;
   line-height: 1;
+}
+.fpanel-nav .icon-btn--svg {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 7px;
 }
 .fpanel-nav .icon-btn:disabled {
   opacity: 0.4;
@@ -408,24 +470,57 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  border-radius: 8px;
+}
+.fpanel-list--dragover {
+  outline: 2px dashed var(--lamp);
+  outline-offset: -2px;
+  background: var(--panel-2);
+}
+.fentry-head,
+.fentry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 60px 92px;
+  align-items: center;
+  gap: 8px;
+}
+.fentry-head {
+  padding: 2px 7px 6px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
+}
+.fentry-head-size,
+.fentry-head-modified {
+  text-align: right;
 }
 .fentry {
-  display: flex;
-  align-items: center;
-  gap: 7px;
   padding: 4px 7px;
   border-radius: 6px;
   font-family: var(--mono);
   font-size: 12.5px;
   color: var(--muted);
-  white-space: nowrap;
+  cursor: pointer;
 }
 .fentry--dir {
   color: var(--text);
-  cursor: pointer;
 }
 .fentry:hover {
   background: var(--panel-2);
+}
+.fentry--sel,
+.fentry--sel:hover {
+  background: rgba(242, 179, 61, 0.16);
+  color: var(--text);
+}
+.fentry-main {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
 }
 /* Ikon file/folder per kategori extension */
 .fi {
@@ -465,14 +560,18 @@ body {
   opacity: 0.6;
 }
 .fentry-name {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.fentry-size {
+.fentry-size,
+.fentry-modified {
   color: #62798a;
   font-size: 11px;
-  flex: none;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fpanel-msg {
   color: var(--muted);

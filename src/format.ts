@@ -61,6 +61,29 @@ export function levelOf(ms: number | null): 0 | 1 | 2 | 3 | 4 {
 
 export const SIG_LABEL = ["timeout", "lemah", "sedang", "bagus", "sangat bagus"];
 
+const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+/** Epoch detik → "8 Jul 2026 14:32"; null → "-". */
+export function fmtDate(epochSeconds: number | null): string {
+  if (epochSeconds === null) return "-";
+  const d = new Date(epochSeconds * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()} ${hh}:${mm}`;
+}
+
+/** Ringkas untuk kolom sempit: tahun ini → "8 Jul 14:32"; tahun lain →
+ *  "8 Jul 2024"; null → "". Tanggal lengkap tetap tersedia lewat fmtDate(). */
+export function fmtDateShort(epochSeconds: number | null): string {
+  if (epochSeconds === null) return "";
+  const d = new Date(epochSeconds * 1000);
+  const dm = `${d.getDate()} ${BULAN[d.getMonth()]}`;
+  if (d.getFullYear() !== new Date().getFullYear()) return `${dm} ${d.getFullYear()}`;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${dm} ${hh}:${mm}`;
+}
+
 /** "93784 detik" → "1h 2j"; di bawah sehari "2j 3m"; di bawah sejam "42m". */
 export function fmtUptime(s: number): string {
   const d = Math.floor(s / 86400);

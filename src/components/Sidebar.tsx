@@ -3,13 +3,26 @@ import type { Host } from "../types";
 
 interface Props {
   hosts: Host[];
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   onConnect: (host: Host) => void;
   onEdit: (host: Host) => void;
   onDelete: (host: Host) => void;
   onAdd: () => void;
 }
 
-export default function Sidebar({ hosts, onConnect, onEdit, onDelete, onAdd }: Props) {
+/** Huruf awal label (atau host) untuk lencana rail. */
+const initialOf = (h: Host) => (h.label || h.host).trim().charAt(0).toUpperCase() || "?";
+
+export default function Sidebar({
+  hosts,
+  collapsed,
+  onToggleCollapse,
+  onConnect,
+  onEdit,
+  onDelete,
+  onAdd,
+}: Props) {
   const [q, setQ] = useState("");
 
   const filtered = useMemo(() => {
@@ -19,6 +32,33 @@ export default function Sidebar({ hosts, onConnect, onEdit, onDelete, onAdd }: P
       [h.label, h.host, h.username].some((v) => v.toLowerCase().includes(needle)),
     );
   }, [hosts, q]);
+
+  // Rail sempit: hanya lencana inisial tiap host (tetap bisa diklik untuk
+  // menyambung), tombol perluas di atas, dan tombol tambah host di bawah.
+  if (collapsed) {
+    return (
+      <aside className="sidebar sidebar--rail">
+        <button className="rail-toggle" title="Perluas daftar host" onClick={onToggleCollapse}>
+          ›
+        </button>
+        <div className="host-list host-list--rail">
+          {hosts.map((h) => (
+            <button
+              key={h.id}
+              className="host-rail"
+              title={`Sambungkan ke ${h.username}@${h.host}`}
+              onClick={() => onConnect(h)}
+            >
+              {initialOf(h)}
+            </button>
+          ))}
+        </div>
+        <button className="btn btn--primary rail-add" title="Host baru" onClick={onAdd}>
+          +
+        </button>
+      </aside>
+    );
+  }
 
   return (
     <aside className="sidebar">
@@ -39,6 +79,9 @@ export default function Sidebar({ hosts, onConnect, onEdit, onDelete, onAdd }: P
             strokeLinecap="round"
           />
         </svg>
+        <button className="rail-toggle" title="Ciutkan daftar host" onClick={onToggleCollapse}>
+          ‹
+        </button>
       </div>
 
       <input

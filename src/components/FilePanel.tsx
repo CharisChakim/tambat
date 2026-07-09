@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   connectParamsFor,
   panelClose,
@@ -11,8 +12,19 @@ import {
   panelRename,
   panelStats,
   panelTransfer,
+  panelUpload,
+  pickFilesToUpload,
 } from "../api";
-import { BAT_STATUS, diskOfPath, fmtBytes, fmtShort, fmtUptime, joinPath } from "../format";
+import {
+  BAT_STATUS,
+  diskOfPath,
+  fmtBytes,
+  fmtDate,
+  fmtDateShort,
+  fmtShort,
+  fmtUptime,
+  joinPath,
+} from "../format";
 import type { DirEntry, DirListing, ServerStats, Tab } from "../types";
 import FileAskDialog, { type AskState } from "./FileAskDialog";
 import FileContextMenu from "./FileContextMenu";
@@ -20,6 +32,45 @@ import FileIcon from "./FileIcon";
 import { Chip, IC_BAT, IC_DISK, IC_RAM, IC_TEMP, IC_UPTIME, PingChip } from "./StatChips";
 
 const POLL_MS = 5000;
+
+/** Bentuk file dengan lipatan sudut, dipakai ikon unggah & unduh. */
+const berkasOutline = (
+  <>
+    <path
+      d="M4 1.6h5.2L13 5.4V13.4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.6a1 1 0 0 1 1-1z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+    />
+    <path d="M9.2 1.6v3.8H13" fill="none" stroke="currentColor" strokeWidth="1.2" />
+  </>
+);
+const IconUpload = (
+  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+    {berkasOutline}
+    <path
+      d="M8 12V7.6M6.1 9.2L8 7.3l1.9 1.9"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+const IconDownload = (
+  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+    {berkasOutline}
+    <path
+      d="M8 7.3v4.4M6.1 9.8L8 11.7l1.9-1.9"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 interface Props {
   tab: Tab;
@@ -59,6 +110,12 @@ export default function FilePanel({ tab, active, cwd }: Props) {
   useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const listingRef = useRef(listing);
+  listingRef.current = listing;
+  /** true selagi file diseret di atas panel (drag & drop dari file manager OS) */
+  const [dragOver, setDragOver] = useState(false);
+  /** entri yang sedang dipilih (klik tunggal); dasar tombol "unduh terpilih" */
+  const [selected, setSelected] = useState<DirEntry | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -109,6 +166,7 @@ export default function FilePanel({ tab, active, cwd }: Props) {
       const l = await panelList(panelId, p);
       setListing(l);
       setPathInput(l.path);
+      setSelected(null);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -151,6 +209,50 @@ export default function FilePanel({ tab, active, cwd }: Props) {
       setBusyMsg(null);
     }
   };
+
+  /** Unggah satu atau beberapa file lokal ke `destPath` di server. */
+  const uploadTo = async (destPath: string, localPaths: string[]) => {
+    if (localPaths.length === 0) return;
+    for (const p of localPaths) {
+      setBusyMsg(`mengunggah ${p.split("/").pop()}…`);
+      try {
+        await panelUpload(panelId, p, destPath);
+        setError(null);
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+    setBusyMsg(null);
+    await navigate(destPath);
+  };
+
+  const pickAndUpload = async () => {
+    if (!listing) return;
+    const picked = await pickFilesToUpload().catch(() => null);
+    if (picked) await uploadTo(listing.path, picked);
+  };
+
+  // Drag & drop file dari file manager OS langsung ke panel; hanya diproses
+  // saat tab ini aktif, karena event drag-drop bersifat window-wide (semua
+  // instance FilePanel yang ter-mount menerimanya, termasuk tab yang tersembunyi).
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((e) => {
+      if (!activeRef.current) return;
+      if (e.payload.type === "enter" || e.payload.type === "over") {
+        setDragOver(true);
+      } else if (e.payload.type === "leave") {
+        setDragOver(false);
+      } else if (e.payload.type === "drop") {
+        setDragOver(false);
+        const dest = listingRef.current?.path;
+        if (dest) uploadTo(dest, e.payload.paths);
+      }
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelId]);
 
   /** Eksekusi dialog `ask` (ganti nama / folder baru / hapus). */
   const submitAsk = async () => {
@@ -241,6 +343,26 @@ export default function FilePanel({ tab, active, cwd }: Props) {
         >
           ⟳
         </button>
+        <button
+          className="icon-btn icon-btn--svg"
+          title="Unggah file…"
+          disabled={!listing}
+          onClick={pickAndUpload}
+        >
+          {IconUpload}
+        </button>
+        <button
+          className="icon-btn icon-btn--svg"
+          title={
+            selected && !selected.isDir
+              ? `Unduh ${selected.name}`
+              : "Unduh file terpilih (pilih file dulu)"
+          }
+          disabled={!selected || selected.isDir}
+          onClick={() => selected && !selected.isDir && download(selected)}
+        >
+          {IconDownload}
+        </button>
         {(loading || busyMsg) && <span className="fpanel-busy">{busyMsg ?? "…"}</span>}
       </div>
 
@@ -258,7 +380,7 @@ export default function FilePanel({ tab, active, cwd }: Props) {
       {notice && <div className="fpanel-note">{notice}</div>}
 
       <div
-        className="fpanel-list"
+        className={"fpanel-list" + (dragOver ? " fpanel-list--dragover" : "")}
         onContextMenu={(e) => {
           e.preventDefault();
           if (listing) setMenu({ x: e.clientX, y: e.clientY, entry: null });
@@ -266,26 +388,42 @@ export default function FilePanel({ tab, active, cwd }: Props) {
       >
         {!listing && !error && <div className="fpanel-msg">memuat…</div>}
         {listing?.entries.length === 0 && <div className="fpanel-msg">folder kosong</div>}
+        {listing && listing.entries.length > 0 && (
+          <div className="fentry-head">
+            <span>Nama</span>
+            <span className="fentry-head-size">Ukuran</span>
+            <span className="fentry-head-modified">Dimodifikasi</span>
+          </div>
+        )}
         {listing?.entries.map((en) => (
           <div
             key={en.name}
             className={
               "fentry" +
               (en.isDir ? " fentry--dir" : " fentry--file") +
+              (selected?.name === en.name ? " fentry--sel" : "") +
               (en.name.startsWith(".") ? " fentry--hidden" : "")
             }
             title={en.name}
-            onClick={() => en.isDir && navigate(joinPath(listing.path, en.name))}
-            onDoubleClick={() => !en.isDir && openFile(en)}
+            onClick={() => setSelected(en)}
+            onDoubleClick={() =>
+              en.isDir ? navigate(joinPath(listing.path, en.name)) : openFile(en)
+            }
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              setSelected(en);
               setMenu({ x: e.clientX, y: e.clientY, entry: en });
             }}
           >
-            <FileIcon name={en.name} isDir={en.isDir} />
-            <span className="fentry-name">{en.name}</span>
-            {!en.isDir && <span className="fentry-size">{fmtBytes(en.size)}</span>}
+            <span className="fentry-main">
+              <FileIcon name={en.name} isDir={en.isDir} />
+              <span className="fentry-name">{en.name}</span>
+            </span>
+            <span className="fentry-size">{en.isDir ? "" : fmtBytes(en.size)}</span>
+            <span className="fentry-modified" title={fmtDate(en.modified)}>
+              {fmtDateShort(en.modified)}
+            </span>
           </div>
         ))}
       </div>

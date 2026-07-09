@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { ConnectParams, DirListing, Host, ServerStats, Tab } from "./types";
 
 /** Parameter koneksi dari sebuah tab: kredensial yang dikirim tergantung authType-nya. */
@@ -58,7 +59,14 @@ export const panelDelete = (id: string, path: string) =>
 export const panelDownload = (id: string, path: string) =>
   invoke<string>("panel_download", { id, path });
 
+export const panelUpload = (id: string, localPath: string, destDir: string) =>
+  invoke<void>("panel_upload", { id, localPath, destDir });
+
 export const panelClose = (id: string) => invoke<void>("panel_close", { id });
+
+/** Buka dialog pilih file bawaan OS (bisa banyak file); null jika pengguna membatalkan. */
+export const pickFilesToUpload = () =>
+  open({ multiple: true, directory: false }) as Promise<string[] | null>;
 
 // ---- Rahasia tersimpan (keyring sistem) ----
 export const secretSet = (id: string, secret: string) =>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import FilePanel from "./components/FilePanel";
 import HostForm from "./components/HostForm";
@@ -31,6 +31,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [formHost, setFormHost] = useState<Host | null | undefined>(undefined); // undefined = tertutup
   const [showPanel, setShowPanel] = useState(true);
+  /** sidebar daftar host menciut jadi rail sempit (otomatis saat sesi pertama) */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const prevTabCount = useRef(0);
   /** direktori kerja shell tiap tab, dilaporkan live oleh TermView lewat OSC 7 */
   const [cwd, setCwd] = useState<Record<string, string>>({});
   const [prompt, setPrompt] = useState<{ host: Host; kind: "password" | "passphrase" } | null>(
@@ -50,7 +53,8 @@ export default function App() {
         (e.target as HTMLElement)?.closest?.(".term-host");
       if (e.key === "/" && !inInput) {
         e.preventDefault();
-        document.getElementById("host-search")?.focus();
+        setSidebarCollapsed(false); // pastikan kotak cari terlihat sebelum difokus
+        setTimeout(() => document.getElementById("host-search")?.focus(), 0);
       }
       if (e.key === "w" && e.ctrlKey && e.shiftKey && activeTab) {
         e.preventDefault();
@@ -61,6 +65,17 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, tabs]);
+
+  // Sidebar menciut sendiri saat sesi pertama dibuka, dan mengembang lagi saat
+  // semua tab ditutup. Hanya bereaksi pada transisi tepi (0↔banyak), jadi tidak
+  // melawan toggle manual pengguna di antara kedua keadaan itu.
+  useEffect(() => {
+    const prev = prevTabCount.current;
+    const now = tabs.length;
+    if (prev === 0 && now > 0) setSidebarCollapsed(true);
+    else if (prev > 0 && now === 0) setSidebarCollapsed(false);
+    prevTabCount.current = now;
+  }, [tabs.length]);
 
   const openTab = (host: Host, secret?: string) => {
     const tab: Tab = { tabId: newTabId(), host, secret, status: "connecting", attempt: 1 };
@@ -145,9 +160,12 @@ export default function App() {
     });
   };
 
-  const saveHost = async (host: Host) => {
+  const saveHost = async (host: Host, secret?: string) => {
     setHosts(await hostsSave(host));
     setFormHost(undefined);
+    if (secret === undefined) return; // mode ubah host: tidak langsung connect
+    if (secret) secretCache.set(host.id, secret);
+    openTab(host, host.authType === "agent" ? undefined : secret);
   };
 
   const deleteHost = async (host: Host) => {
@@ -163,6 +181,8 @@ export default function App() {
     <div className="layout">
       <Sidebar
         hosts={hosts}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
         onConnect={connect}
         onAdd={() => setFormHost(null)}
         onEdit={(h) => setFormHost(h)}

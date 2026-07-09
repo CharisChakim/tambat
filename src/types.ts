@@ -32,6 +32,8 @@ export interface DirEntry {
   name: string;
   isDir: boolean;
   size: number;
+  /** waktu modifikasi terakhir, detik sejak epoch; null jika server tidak melaporkannya */
+  modified: number | null;
 }
 
 export interface DirListing {

@@ -57,6 +57,12 @@ pub enum PanelCmd {
         path: String,
         reply: Sender<Result<std::path::PathBuf, String>>,
     },
+    /// Unggah file lokal ke dalam folder dest_dir di server.
+    Upload {
+        local_path: std::path::PathBuf,
+        dest_dir: String,
+        reply: Sender<Result<(), String>>,
+    },
     Close,
 }
 
@@ -66,6 +72,8 @@ pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    /// Waktu modifikasi terakhir, detik sejak epoch; None jika server tidak melaporkannya.
+    pub modified: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -274,6 +282,7 @@ fn do_list(sftp: &Sftp, path: &str) -> Result<DirListing, String> {
                 name,
                 is_dir,
                 size: st.size.unwrap_or(0),
+                modified: st.mtime,
             })
         })
         .collect();
@@ -451,6 +460,29 @@ fn do_download(sftp: &Sftp, path: &str) -> Result<std::path::PathBuf, String> {
     Ok(local)
 }
 
+fn do_upload(sftp: &Sftp, local_path: &Path, dest_dir: &str) -> Result<(), String> {
+    let name = local_path
+        .file_name()
+        .ok_or("Nama file lokal tidak valid")?
+        .to_string_lossy()
+        .into_owned();
+    let dest = if dest_dir == "/" {
+        format!("/{}", name)
+    } else {
+        format!("{}/{}", dest_dir, name)
+    };
+    if sftp.stat(Path::new(&dest)).is_ok() {
+        return Err(format!("Sudah ada \"{}\" di folder tujuan", name));
+    }
+    let mut file = std::fs::File::open(local_path)
+        .map_err(|e| format!("Gagal membuka file lokal: {}", e))?;
+    let mut remote = sftp
+        .create(Path::new(&dest))
+        .map_err(|e| format!("Gagal membuat file di server: {}", e))?;
+    std::io::copy(&mut file, &mut remote).map_err(|e| format!("Gagal mengunggah file: {}", e))?;
+    Ok(())
+}
+
 /// Buka file lokal dengan aplikasi default pengguna; kalau tidak ada
 /// asosiasi (atau `force_text`), jatuh ke text editor.
 fn open_local(path: &Path, force_text: bool) -> Result<(), String> {
@@ -552,6 +584,13 @@ pub async fn panel_open(
                 }
                 PanelCmd::Download { path, reply } => {
                     let _ = reply.send(do_download(&sftp, &path));
+                }
+                PanelCmd::Upload {
+                    local_path,
+                    dest_dir,
+                    reply,
+                } => {
+                    let _ = reply.send(do_upload(&sftp, &local_path, &dest_dir));
                 }
                 PanelCmd::Close => break,
             }
@@ -739,6 +778,28 @@ pub async fn panel_download(
     Ok(local.to_string_lossy().into_owned())
 }
 
+/// Unggah file lokal ke folder `dest_dir` di server.
+#[tauri::command]
+pub async fn panel_upload(
+    state: State<'_, PanelState>,
+    id: String,
+    local_path: std::path::PathBuf,
+    dest_dir: String,
+) -> Result<(), String> {
+    dispatch(
+        &state,
+        &id,
+        Duration::from_secs(600),
+        "Waktu habis mengunggah file",
+        move |reply: Sender<Result<(), String>>| PanelCmd::Upload {
+            local_path,
+            dest_dir,
+            reply,
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 pub fn panel_close(state: State<'_, PanelState>, id: String) {
     if let Some(tx) = state.conns.lock().unwrap().remove(&id) {
@@ -813,6 +874,8 @@ mod tests {
             names
         );
         assert!(l.entries[0].is_dir, "folder harus diurutkan lebih dulu");
+        let berkas = l.entries.iter().find(|e| e.name == "berkas.txt").unwrap();
+        assert!(berkas.modified.is_some(), "waktu modifikasi harus terbaca");
 
         let s = super::do_stats(&sess).unwrap();
         assert!(s.mem_total_kb > 0, "MemTotal harus terbaca");
@@ -822,6 +885,20 @@ mod tests {
         // Unduh file (dipakai fitur "buka dengan aplikasi default")
         let local = super::do_fetch(&sftp, "/tmp/tambat-e2e-panel/berkas.txt").unwrap();
         assert_eq!(std::fs::read_to_string(&local).unwrap(), "halo");
+
+        // Unggah file baru dari lokal (folder terpisah dari folder remote di atas), tolak duplikat
+        let upload_dir = std::path::Path::new("/tmp/tambat-e2e-upload-src");
+        let _ = std::fs::remove_dir_all(upload_dir);
+        std::fs::create_dir_all(upload_dir).unwrap();
+        let upload_src = upload_dir.join("unggahan.txt");
+        std::fs::write(&upload_src, b"data unggahan").unwrap();
+        super::do_upload(&sftp, &upload_src, "/tmp/tambat-e2e-panel").unwrap();
+        let uploaded = super::do_fetch(&sftp, "/tmp/tambat-e2e-panel/unggahan.txt").unwrap();
+        assert_eq!(std::fs::read_to_string(&uploaded).unwrap(), "data unggahan");
+        assert!(
+            super::do_upload(&sftp, &upload_src, "/tmp/tambat-e2e-panel").is_err(),
+            "duplikat saat unggah harus ditolak"
+        );
 
         // Salin ke subdir, tolak duplikat, lalu pindahkan ke folder lain
         super::do_transfer(
