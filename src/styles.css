@@ -821,12 +821,12 @@ body {
   color: var(--muted);
   gap: 4px;
 }
-.welcome-mark {
-  font-family: var(--mono);
-  font-size: 34px;
-  color: #6c8a9c;
-  margin-bottom: 14px;
-  letter-spacing: 0.05em;
+.welcome-logo {
+  width: 168px;
+  height: auto;
+  color: var(--lamp);
+  margin-bottom: 22px;
+  filter: drop-shadow(0 0 26px rgba(242, 179, 61, 0.22));
 }
 .welcome p {
   margin: 0;

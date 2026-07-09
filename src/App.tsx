@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
+import Logo from "./components/Logo";
 import FilePanel from "./components/FilePanel";
 import HostForm from "./components/HostForm";
 import SecretPrompt from "./components/SecretPrompt";
@@ -225,9 +226,7 @@ export default function App() {
         <div className="term-area">
           {tabs.length === 0 && (
             <div className="welcome">
-              <div className="welcome-mark">
-                tambat<span className="brand-cursor">_</span>
-              </div>
+              <Logo className="welcome-logo" />
               <p>Pilih host di sisi kiri untuk menambatkan sesi baru,</p>
               <p>
                 atau tekan <kbd>/</kbd> untuk mencari.
