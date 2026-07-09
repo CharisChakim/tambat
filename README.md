@@ -1,23 +1,75 @@
-# Tambat
+# ⚓ Tambat
 
-SSH client desktop yang ringan dan sederhana — alternatif Termius/MobaXterm.
-Dibangun dengan **Tauri 2** (backend Rust + `ssh2`) dan **React + xterm.js**.
+**SSH client desktop yang ringan, aman, dan enak dipakai** — terminal, file
+manager (SFTP), dan monitor server jadi satu, berdampingan di tiap tab.
+Alternatif **gratis & open-source** untuk Termius/MobaXterm.
 
-*Tambat* (bahasa Indonesia): menambatkan — seperti kapal yang ditambatkan ke dermaga.
+Dibangun dengan **Tauri 2** (Rust + `ssh2`) dan **React + xterm.js** — memakai
+WebView bawaan sistem (bukan Chromium tersemat), jadi binarinya hanya ~7 MB.
 
-## Fitur (v0.1)
+*Tambat* (bahasa Indonesia): menambatkan — seperti kapal yang ditambatkan ke dermaga. 🪢
 
-- Session manager: simpan daftar host (label, alamat, port, user), cari cepat dengan `/`
-- Autentikasi: password (diminta saat konek), private key (+passphrase), dan SSH agent
+![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
+![xterm.js](https://img.shields.io/badge/xterm.js-terminal-3A3A3A)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
+## Tampilan
+
+| Sebelum connect | Sesudah connect |
+| :---: | :---: |
+| ![Layar welcome sebelum menambatkan sesi](docs/before-connect.png) | ![Sesi aktif: terminal + panel file setelah connect](docs/after-connect.png) |
+
+## ⚓ Filosofi nama
+
+Dalam pelayaran, **menambatkan** adalah mengikat kapal ke dermaga dengan tali —
+menahannya tetap di tempat di tengah arus, aman dan siap dimuati. Sebuah sesi
+SSH pada dasarnya sama: Anda melempar tali ke server nun jauh, mengikatnya erat,
+lalu bekerja dari geladak sendiri seolah kapal dan dermaga menyatu.
+
+Setiap **host** adalah dermaga. Setiap **tab** adalah satu tali tambat. Aksen
+**amber** di seluruh aplikasi adalah *lampu dermaga* yang menuntun kapal pulang
+di malam hari. Maka namanya **Tambat** — bukan sekadar "menyambung", tetapi
+menautkan diri dengan mantap ke sisi seberang, selama Anda membutuhkannya.
+
+## ✨ Kenapa Tambat?
+
+- **Satu jendela, semua yang Anda butuh** — terminal berwarna penuh, file
+  browser SFTP, dan statistik server (RAM · disk · suhu · baterai · ping)
+  berdampingan di setiap tab.
+- **Aman sejak awal** — password & passphrase disimpan di **keyring sistem**
+  OS, tidak pernah ditulis ke file biasa.
+- **Alur kerja cepat** — cari host dengan `/`, connect satu klik, sidebar
+  otomatis menciut jadi rail saat sesi mulai, dan panel file mengikuti `cd`
+  Anda di terminal secara live.
+- **Terasa seperti desktop** — jelajah file berkolom (Nama/Ukuran/Dimodifikasi),
+  dobel-klik untuk buka, dan drag-and-drop file dari OS untuk mengunggah.
+
+## Fitur
+
+**Koneksi & terminal**
+- Session manager: simpan host (label, alamat, port, user), cari kilat dengan `/`
+- Autentikasi password, private key (+passphrase), dan SSH agent
 - Terminal penuh via xterm.js (xterm-256color, scrollback 8000 baris, klik URL)
-- Multi-tab dengan indikator status koneksi, tutup tab dengan `Ctrl+Shift+W`
-- File panel (SFTP) per tab: jelajah folder, buka file dengan aplikasi default,
-  salin/pindah file antar folder di server
-- Statistik server di panel: RAM, disk, baterai, suhu CPU, ping ke 1.1.1.1/8.8.8.8
-- Password/passphrase: pilih per host — tanya setiap kali, ingat di memori selama
-  aplikasi berjalan, atau simpan permanen di **keyring sistem** (Secret Service /
-  Credential Manager / Keychain). Tidak pernah ditulis ke file biasa.
-- Daftar host disimpan sebagai JSON di direktori data aplikasi
+- Multi-tab dengan indikator status koneksi live, tutup tab `Ctrl+Shift+W`
+- Sidebar host bisa menciut jadi rail sempit — otomatis saat sesi pertama,
+  tetap satu klik untuk menyambung
+
+**File & SFTP (panel per tab)**
+- Jelajah folder dengan tampilan kolom Nama / Ukuran / Dimodifikasi
+- Dobel-klik buka file dengan aplikasi default; salin, pindah, ganti nama,
+  hapus, dan buat folder di server
+- **Unggah**: tombol toolbar (pilih file) atau drag-and-drop langsung dari
+  file manager OS
+- **Unduh** file terpilih ke folder Unduhan
+- Panel otomatis mengikuti direktori kerja terminal (via OSC 7)
+
+**Monitor & keamanan**
+- Statistik server live: RAM, disk per partisi, suhu CPU, baterai, ping ke 1.1.1.1/8.8.8.8
+- Secret per host: tanya tiap kali · ingat selama app berjalan · atau simpan
+  permanen di **keyring sistem** (Secret Service / Keychain / Credential Manager)
+- Daftar host tersimpan sebagai JSON di direktori data app
   (Linux: `~/.local/share/app.tambat.desktop/hosts.json`)
 
 ## Prasyarat build
@@ -87,15 +139,13 @@ python3 tests/mock_sshd.py &
 cargo test -- --ignored
 ```
 
-## Roadmap yang disarankan
+## Roadmap
 
-1. **Verifikasi host key** — saat ini host key server belum diverifikasi
-   (known_hosts). Tambahkan `sess.known_hosts()` + dialog konfirmasi
-   fingerprint sebelum dipakai di jaringan yang tidak dipercaya.
-2. **Upload/download** antara mesin lokal dan server di file panel
-   (saat ini baru jelajah, buka, dan salin/pindah antar folder remote).
-3. Split pane, snippet/command palette, port forwarding UI, jump host,
-   grup/folder host, tema terang.
+1. **Verifikasi host key** — host key server belum diverifikasi (known_hosts).
+   Tambahkan `sess.known_hosts()` + dialog konfirmasi fingerprint sebelum
+   dipakai di jaringan yang tidak dipercaya.
+2. Split pane, snippet/command palette, port forwarding UI, jump host,
+   grup/folder host, dan tema terang.
 
 ## Lisensi
 
