@@ -474,12 +474,47 @@ fn do_upload(sftp: &Sftp, local_path: &Path, dest_dir: &str) -> Result<(), Strin
     if sftp.stat(Path::new(&dest)).is_ok() {
         return Err(format!("Sudah ada \"{}\" di folder tujuan", name));
     }
+    // Folder → salin rekursif; file → salin langsung. Tanpa ini, men-drag folder
+    // membuat `File::open` pada direktori gagal ("Gagal membuka file lokal").
+    let meta = std::fs::metadata(local_path)
+        .map_err(|e| format!("Gagal membaca \"{}\": {}", name, e))?;
+    if meta.is_dir() {
+        upload_dir(sftp, local_path, &dest)
+    } else {
+        upload_file(sftp, local_path, &dest)
+    }
+}
+
+/// Salin satu file lokal ke path remote `dest`. Pemanggil sudah memastikan
+/// `dest` belum ada (untuk item level atas) atau berada di folder yang baru dibuat.
+fn upload_file(sftp: &Sftp, local_path: &Path, dest: &str) -> Result<(), String> {
     let mut file = std::fs::File::open(local_path)
         .map_err(|e| format!("Gagal membuka file lokal: {}", e))?;
     let mut remote = sftp
-        .create(Path::new(&dest))
+        .create(Path::new(dest))
         .map_err(|e| format!("Gagal membuat file di server: {}", e))?;
     std::io::copy(&mut file, &mut remote).map_err(|e| format!("Gagal mengunggah file: {}", e))?;
+    Ok(())
+}
+
+/// Unggah folder lokal secara rekursif ke `dest` (yang belum ada di server).
+fn upload_dir(sftp: &Sftp, local_dir: &Path, dest: &str) -> Result<(), String> {
+    sftp.mkdir(Path::new(dest), 0o755)
+        .map_err(|e| format!("Gagal membuat folder di server: {}", e))?;
+    let entries =
+        std::fs::read_dir(local_dir).map_err(|e| format!("Gagal membaca folder lokal: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let child = entry.path();
+        let cname = entry.file_name().to_string_lossy().into_owned();
+        let cdest = format!("{}/{}", dest, cname);
+        let ft = entry.file_type().map_err(|e| e.to_string())?;
+        if ft.is_dir() {
+            upload_dir(sftp, &child, &cdest)?;
+        } else {
+            upload_file(sftp, &child, &cdest)?;
+        }
+    }
     Ok(())
 }
 
