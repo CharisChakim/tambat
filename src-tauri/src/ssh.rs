@@ -175,7 +175,10 @@ pub async fn ssh_connect(
         // Sintaks array bash/zsh (`+=(...)`) ditaruh dalam `eval` string tunggal-kutip
         // supaya shell POSIX polos (dash/ash) tidak ikut mem-parsingnya sama sekali —
         // tanpa ini, shell login yang bukan bash/zsh gagal parse dan menampilkan error.
-        let osc7_setup = r#"if [ -n "$ZSH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "${precmd_functions[*]-}" in *__tambat_osc7*) ;; *) precmd_functions+=(__tambat_osc7);; esac'; elif [ -n "$BASH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "$PROMPT_COMMAND" in *__tambat_osc7*) ;; *) PROMPT_COMMAND="__tambat_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}";; esac'; fi; type __tambat_osc7 >/dev/null 2>&1 && __tambat_osc7; stty echo 2>/dev/null
+        // Diakhiri `stty echo` (nyalakan lagi echo utk input pengguna) lalu
+        // `printf '\033[1A\033[2K'` (naik 1 baris, hapus baris prompt pertama) supaya
+        // eksekusi snippet tidak menyisakan prompt duplikat — prompt kedua menimpanya.
+        let osc7_setup = r#"if [ -n "$ZSH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "${precmd_functions[*]-}" in *__tambat_osc7*) ;; *) precmd_functions+=(__tambat_osc7);; esac'; elif [ -n "$BASH_VERSION" ]; then eval '__tambat_osc7() { printf "\033]7;file://%s%s\007" "$(hostname)" "$PWD"; }; case "$PROMPT_COMMAND" in *__tambat_osc7*) ;; *) PROMPT_COMMAND="__tambat_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}";; esac'; fi; type __tambat_osc7 >/dev/null 2>&1 && __tambat_osc7; stty echo 2>/dev/null; printf '\033[1A\033[2K'
 "#;
         let _ = ch.write_all(osc7_setup.as_bytes());
 
