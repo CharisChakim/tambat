@@ -229,7 +229,7 @@ export default function App() {
               <Logo className="welcome-logo" />
               <div className="welcome-tag">
                 Tambatkan ip mu
-                <span className="sig" aria-hidden="true">
+                <span className="welcome-sig" aria-hidden="true">
                   <span>_</span>
                   <span>_</span>
                   <span>_</span>
