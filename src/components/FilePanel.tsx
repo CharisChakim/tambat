@@ -71,6 +71,18 @@ const IconDownload = (
     />
   </svg>
 );
+const IconDelete = (
+  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+    {berkasOutline}
+    <path
+      d="M6.2 9.3l3.6 3.6M9.8 9.3l-3.6 3.6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
+  </svg>
+);
 
 interface Props {
   tab: Tab;
@@ -175,11 +187,16 @@ export default function FilePanel({ tab, active, cwd }: Props) {
     }
   };
 
-  // Ikuti pwd terminal: setiap `cwd` berubah (atau begitu listing awal siap),
-  // pindah ke sana kalau belum di situ.
+  // Ikuti pwd terminal, TAPI hanya ketika terminal benar-benar `cd` (nilai `cwd`
+  // berubah). Tanpa penjaga ini, navigasi folder manual di panel (yang mengubah
+  // `listing`) akan memicu efek dan menyeret balik ke pwd terminal — bug "buka
+  // folder langsung balik ke home".
+  const lastCwd = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!cwd || !listing || cwd === listing.path) return;
-    navigate(cwd);
+    if (!cwd || !listing) return;
+    if (cwd === lastCwd.current) return; // terminal belum cd sejak terakhir diikuti
+    lastCwd.current = cwd;
+    if (cwd !== listing.path) navigate(cwd);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, listing]);
 
@@ -362,6 +379,14 @@ export default function FilePanel({ tab, active, cwd }: Props) {
           onClick={() => selected && !selected.isDir && download(selected)}
         >
           {IconDownload}
+        </button>
+        <button
+          className="icon-btn icon-btn--svg icon-btn--danger"
+          title={selected ? `Hapus ${selected.name}` : "Hapus item terpilih (pilih dulu)"}
+          disabled={!selected}
+          onClick={() => selected && setAsk({ kind: "delete", entry: selected })}
+        >
+          {IconDelete}
         </button>
         {(loading || busyMsg) && <span className="fpanel-busy">{busyMsg ?? "…"}</span>}
       </div>
